@@ -230,19 +230,27 @@
 	  
 	const appState = {};
 
+	Object.prototype.isEmpty = () => {
+		for(let key in this){
+			if(this.hasOwnProperty(key))
+			return false;
+		}
+		return true;
+	}
+
 	const formatAsMoney = (amount, buyerCountry) => {
 		const country = countries.find(country => {
 			return country.country === buyerCountry;
 		});
-		if (country) {
-			return amount.toLocaleString('en-' + country.code, {
+		if (country.isEmpty()) {
+			return amount.toLocaleString('en-US' + country.code, {
 				style: 'currency',
-				currency: country.currency
+				currency: 'USD'
 			});
 		} else {
-			return amount.toLocaleString('en-', + countries[0].code, {
+			return amount.toLocaleString(`en-${country.code}`, {
 				style: 'currency',
-				currency: countries[0].currency
+				currency: `${country.currency}`
 			});
 		}
 	};
@@ -265,8 +273,24 @@ const expiryDateFormatIsValid = (field) => {
 
 
 const detectCardType = (first4Digits) => {
-	
+	const convertDigitFromStringToNumber = parseInt(first4Digits, 10);
+	if(convertDigitFromStringToNumber === 4){
+		document.querySelector('div[data-credit-card]').classList.add('is-visa');
+
+	document.querySelector('img[data-card-type]').src=supportedCards.visa;
+	return 'is-visa'
+	}
+
+	if(convertDigitFromStringToNumber === 5){
+		document.querySelector('div[data-credit-card]').classList.remove('is-visa');
+
+		document.querySelector('div[data-credit-card]').classList.add('is-mastercard');
+
+		document.querySelector('img[data-card-type]').src = supportedCards.mastercard;
+		return 'is-mastercard';
+	}
 };
+
 
 const validateCardExpiryDate = () => {
 	const field = document.querySelector('[data-cc-info] input:nth-child(2)');
@@ -290,7 +314,20 @@ const name = document.querySelector('[data-cc-info] input:nth-child(1)');
 
 
 const validateCardNumber = () => {
+	let result = appState.cardDigits.flat(Infinity);
+	console.log('result from card', result);
+	
+	let isvalid = validateWithLuhn(result);
+	console.log('is card valid: ', isvalid);
 
+	console.log('app state', appState.cardDigits.flat(2))
+
+	if(isvalid){
+		document.querySelector('div[data-cc-digits]').classList.remove('is-valid')
+	}else{
+		document.querySelector('div[data-cc-digits]').classList.add('is-invalid')
+	}
+	return isvalid;
 };
 
 const validatePayment = () => {
@@ -301,16 +338,85 @@ const validatePayment = () => {
 
 const acceptCardNumbers = (event, fieldIndex) => {
 
-};
-
-const smartInput = (event, fieldIndex) => {
 
 };
+
+const smartInput = (event, fieldIndex, fields) => {
+	console.log('event:', event);
+	console.log('Blob', fieldIndex);
+	console.log('alll'. fields);
+	const controlKeys = [
+		'Tab',
+		'Delete',
+		'Backspace',
+		'ArrowLeft',
+		'ArrowRight',
+		'ArrowUp',
+		'ArrowDown',
+		'Shift'
+	];
+
+	const isControlKey = controlKeys.includes(event.key);
+	if(!isControlKey){
+		if(fieldIndex <= 3){
+			if(/^\d$/.test(event.key)){
+				if(appState.cardDigits[fieldIndex] === undefined){
+					appState.cardDigits[fieldIndex] = [];
+				}
+				
+				let field = fields[fieldIndex];
+				event.preventDefault();
+				const target = event.target;
+
+				let {selectionStart, value} = target;
+				appState.cardDigits[fieldIndex][selectionStart] = +event.key;
+			target.value = value.substr(0, selectionStart) + event.key + value.substr(selectionStart + 1);
+			setTimeout(() => {
+				console.log(appState.cardDigits)
+				appState.cardDigits[fieldIndex] = target.value.split('').map((car, i) => (car >= '0' && car <= '9') ? Number(car) : Number(appState.cardDigits[fieldIndex][i]));
+				if(fieldIndex < 3){
+					target.value = target.value.replace(/\d/g, '$');
+				}
+				smartCursor(event, fieldIndex, fields);
+				if(fieldIndex == 0 && target.value.length >= 4){
+					let first4Digits = appState.cardDigits[0];
+					detectCardType(first4Digits);
+				}
+			}, 500)
+
+			}else{
+				event.preventDefault();
+			}
+		}else if(fieldIndex == 4){
+			if(/[a-z]|\s/i.test(event.key)){
+				setTimeout(() =>{
+					smartCursor(event,fieldIndex,fields)
+				}, 500)
+			} else{
+				event.preventDefault();
+			}
+		}
+	} else{
+		if(event.key === 'Backspace'){
+			if(appState.cardDigits[fieldIndex].length > 0){
+				appState.cardDigits[fieldIndex].splice(-1, 1)
+			}else{}
+			smartBackSpace(event,fieldIndex,fields)
+		}else if(event.key == "Delete"){
+			if(appState.cardDigits[fieldIndex].length > 0){
+				appState.cardDigits[fieldIndex].splice(1,1)
+			}
+		}
+	}
+}
 
 
 const smartCursor = (event, fieldIndex, fields) => {
-
-
+	if(fieldIndex < fields.length - 1){
+		if(fields[fieldIndex].value.length === Number(fields[fieldIndex].size)){
+			fields[fieldIndex + 1].focus()
+		}
+	}
 };
 
 const typeAhead = (event, fieldIndex, fields) => {
@@ -318,10 +424,43 @@ const typeAhead = (event, fieldIndex, fields) => {
 
 };
 
+const validateWithLuhn = (digits) => {
+	let value = digits.join("");
+	if(/[^0-9\s]+/.test(value))
+	return false;
+
+	let nCheck = 0, nDigit = 0, bEven = false;
+	value.replace(/\D/g, '');
+
+	for(let n = value.length - 1; n >= 0; n--){
+		let cDigit = value.charAt(n),
+		nDigit = parseInt(cDigit, 10);
+		if(bEven){
+			if((nDigit *= 2) > 9)
+			nDigit = nDigit - 9
+		}
+		nCheck = nCheck + nDigit;
+		bEven = !bEven;
+	}
+	return (nCheck % 10) == 0;
+}
+
+
+const enableSmartTyping = () => {
+	const fields = document.querySelectorAll('input');
+	fields.forEach((field, index, fields) => {
+		field.addEventListener('keydown', event => {
+			smartInput(event, index, fields);
+		})
+	})
+};
+
+
 const uiCanInteract = () => {
 	document.querySelector('[data-cc-digits] input:nth-child(1)').focus();
 	document.querySelector('[data-pay-btn]').addEventListener("click", validatePayment);
 	billHype();
+	enableSmartTyping();
 };
 
 const displayCartTotal = ({results}) => {
@@ -338,6 +477,24 @@ const displayCartTotal = ({results}) => {
 	appState.cardDigits = [];
 	uiCanInteract();
 };
+
+const validateTextFieldLength = (event, maxlength) => {
+	let max1 = parseInt(maxlength.getAttribute('size'), 10);
+	console.log("current character length", event.srcElement.value.length)
+	let currentTargetLength = event.srcElement.value.length;
+
+if (currentTargetLength === max1){
+	return true;
+}
+	return false;
+}
+
+const smartBackSpace = (event, fieldIndex, fields) => {
+	let key = event.char || event.charCode || event.which;
+	if(fields[fieldIndex].value === '' && fieldIndex > 0 && event.key == 'Backspace'){
+		fields[fieldIndex - 1].focus();
+	}
+}
 
 	  const fetchBill = () => {
         const apiHost = 'https://randomapi.com/api';
